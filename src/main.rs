@@ -19,6 +19,7 @@ use reqwest::Error;
 use sdl2::libc::time;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
+use tokio::time::Instant;
 
 const FPS: u32 = 30;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
@@ -36,8 +37,8 @@ struct Connection {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Departure {
-    departureTimestamp: u64,
-    delay: u32,
+    departureTimestamp: Option<u64>,
+    delay: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -63,7 +64,7 @@ struct CustomEventData {
     message: String,
 }
 
-const URL_SBB: &str = "http://transport.opendata.ch/v1/connections?";
+const URL_SBB: &str = "http://www.transport.opendata.ch/v1/connections?";
 
 struct URLRequest {
     begin_station: String,
@@ -75,15 +76,25 @@ struct URLRequest {
 struct URLResult {
     timestamp: SystemTime,
     delay: Duration,
+    error: bool,
 }
 
 impl URLResult {
-    fn new(departure: u64, delay: u32) -> URLResult {
-        let duration_since_epoch = Duration::from_secs(departure);
+    fn new(opt_departure: Option<u64>, opt_delay: Option<u32>) -> URLResult {
+        if opt_departure.is_none() || opt_delay.is_none() {
+            return URLResult {
+                timestamp: SystemTime::now(),
+                delay: Duration::from_secs(0),
+                error: true,
+            };
+        }
+
+        let duration_since_epoch = Duration::from_secs(opt_departure.unwrap());
         let instant = UNIX_EPOCH + duration_since_epoch;
         URLResult {
             timestamp: instant,
-            delay: Duration::from_secs(delay as u64 * 60),
+            delay: Duration::from_secs(opt_delay.unwrap() as u64 * 60),
+            error: false,
         }
     }
 }
@@ -126,7 +137,7 @@ impl DashBoardBusLine {
     }
 
     async fn update(&mut self) {
-        if self.last_update + Duration::from_secs(600) < SystemTime::now() {
+        if self.last_update + Duration::from_secs(600) > SystemTime::now() {
             return;
         }
         let b_sta = &self.request_content.begin_station;
@@ -149,8 +160,10 @@ impl DashBoardBusLine {
         }
 
         let text_to_parse = res_text.unwrap();
+        println!("{}",text_to_parse);
         let conn_res = serde_json::from_str(text_to_parse.as_str());
         if conn_res.is_err() {
+            println!("eee is {}", conn_res.err().unwrap());
             return;
         }
         let conn: Connections = conn_res.unwrap();
@@ -190,13 +203,25 @@ impl Printable for DashBoardBusLine {
 
         let now = SystemTime::now();
         let mut index = 0;
+        let mut last_is_err = false;
         for rr in &self.result_list {
-            if now > rr.timestamp + rr.delay {
+            if rr.error {
+                index+=1;
+                last_is_err = true;
+                continue;
+            }
+
+            if !last_is_err && now > rr.timestamp + rr.delay {
                 break;
             }
+            last_is_err = false;
             index += 1;
         }
         let bn = &self.basename;
+        if self.result_list.len() == 0 {
+            self.line = format!("{bn}: len=0 update req!");
+            return;
+        }
         if index >= self.result_list.len() {
             self.line = format!("{bn}: update req!");
             return;
@@ -416,8 +441,8 @@ fn run(font_path: &Path) -> Result<(), String> {
 
     page.add_sbb_line(
         "T2|HB".to_string(),
-        "Zurich, Freihofstrasse".to_string(),
-        "Zurich, Letzigrund".to_string(),
+        "Zurich,Freihofstrasse".to_string(),
+        "Zurich,Letzigrund".to_string(),
     );
     page.add_sbb_line(
         "T3|HB".to_string(),
@@ -426,13 +451,13 @@ fn run(font_path: &Path) -> Result<(), String> {
     );
     page.add_sbb_line(
         "89|Alt".to_string(),
-        "Zurich, Kappeli".to_string(),
-        "Zurich, Letzipark West".to_string(),
+        "Zurich,Kappeli".to_string(),
+        "Zurich,Letzipark West".to_string(),
     );
     page.add_sbb_line(
         "89|Oer".to_string(),
-        "Zurich, Albisrank".to_string(),
-        "Zurich, Oerlikon".to_string(),
+        "Zurich,Albisrank".to_string(),
+        "Zurich,Oerlikon".to_string(),
     );
 
     dbl.add_page(page);
