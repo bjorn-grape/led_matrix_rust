@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::time::Instant;
 
-const FPS: u32 = 30;
+const FPS: u32 = 5;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
 
 const SCALE_FACTOR: u32 = 10;
@@ -81,7 +81,7 @@ struct URLResult {
 
 impl URLResult {
     fn new(opt_departure: Option<u64>, opt_delay: Option<u32>) -> URLResult {
-        if opt_departure.is_none() || opt_delay.is_none() {
+        if opt_departure.is_none(){
             return URLResult {
                 timestamp: SystemTime::now(),
                 delay: Duration::from_secs(0),
@@ -89,11 +89,16 @@ impl URLResult {
             };
         }
 
+        let mut delay = 0;
+        if  !opt_delay.is_none() {
+            delay = opt_delay.unwrap();
+        }
+
         let duration_since_epoch = Duration::from_secs(opt_departure.unwrap());
         let instant = UNIX_EPOCH + duration_since_epoch;
         URLResult {
             timestamp: instant,
-            delay: Duration::from_secs(opt_delay.unwrap() as u64 * 60),
+            delay: Duration::from_secs(delay as u64 * 60),
             error: false,
         }
     }
@@ -176,6 +181,33 @@ impl DashBoardBusLine {
         self.result_list = url_results;
         self.last_update = SystemTime::now();
     }
+
+    fn make_line_info(&self, index :usize, now: SystemTime) -> String{
+        let mut acc ="".to_string();
+        let bn = &self.basename;
+
+        if index >= self.result_list.len() {
+            acc = format!("{bn}: end reached update req!");
+            return acc;
+        }
+        let current_rr = &self.result_list[index];
+        let ts = current_rr.timestamp + current_rr.delay;
+        let diff_dur_res = ts.duration_since(now);
+        if diff_dur_res.is_err() {
+            acc = format!("{bn}: invalid time!");
+            return acc;
+        }
+        let diff_dur = diff_dur_res.unwrap();
+        let minutes = diff_dur.as_secs() / 60;
+        let seconds = diff_dur.as_secs() % 60;
+        acc = format!("{minutes}:{seconds}");
+
+        let delay = current_rr.delay.as_secs() / 60;
+        if delay != 0 {
+            acc += format!("(+{delay})").as_str();
+        }
+        return acc;
+    }
 }
 
 impl Printable for DashBoardLine {
@@ -196,6 +228,9 @@ impl Printable for DashBoardBusLine {
     fn get_color(&self) -> [u8; 3] {
         self.color.clone()
     }
+
+
+
     fn update_text_field(&mut self) {
         let mut rt = Runtime::new().unwrap();
         let future = self.update();
@@ -203,39 +238,45 @@ impl Printable for DashBoardBusLine {
 
         let now = SystemTime::now();
         let mut index = 0;
-        let mut last_is_err = false;
         for rr in &self.result_list {
             if rr.error {
                 index+=1;
-                last_is_err = true;
                 continue;
             }
+            let is_delay_passed = now > rr.timestamp + rr.delay;
 
-            if !last_is_err && now > rr.timestamp + rr.delay {
+            if !is_delay_passed{
                 break;
             }
-            last_is_err = false;
             index += 1;
         }
+
+        let len_res_list = self.result_list.len();
+
+
         let bn = &self.basename;
         if self.result_list.len() == 0 {
             self.line = format!("{bn}: len=0 update req!");
             return;
         }
-        if index >= self.result_list.len() {
-            self.line = format!("{bn}: update req!");
-            return;
+        while  index < len_res_list {
+            if ! self.result_list[index].error {
+                break;
+            }
+            index+=1;
         }
-        let current_rr = &self.result_list[index];
-        let diff_dur_res = current_rr.timestamp.duration_since(now);
-        if diff_dur_res.is_err() {
-            self.line = format!("{bn}: invalid time!");
-            return;
+
+        let text1 = self.make_line_info(index, now);
+
+        index +=1;
+        while  index < len_res_list {
+            if ! self.result_list[index].error {
+                break;
+            }
+            index+=1;
         }
-        let diff_dur = diff_dur_res.unwrap();
-        let minutes = diff_dur.as_secs() / 60;
-        let seconds = diff_dur.as_secs() % 60;
-        self.line = format!("{bn}: {minutes}:{seconds}");
+        let text2 = self.make_line_info(index, now);
+        self.line = format!("{bn}: {text1} & {text2}")
     }
 }
 
