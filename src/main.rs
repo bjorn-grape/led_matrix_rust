@@ -20,11 +20,14 @@ use sdl2::libc::time;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::time::Instant;
+use image::RgbaImage;
+use sdl2::pixels::PixelFormatEnum;
+use image::imageops::FilterType;
 
-const FPS: u32 = 5;
+const FPS: u32 = 1;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
 
-const SCALE_FACTOR: u32 = 10;
+const SCALE_FACTOR: u32 = 8;
 static SCREEN_WIDTH: u32 = 64 * 3 * SCALE_FACTOR;
 static SCREEN_HEIGHT: u32 = 64 * SCALE_FACTOR;
 const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
@@ -276,7 +279,18 @@ impl Printable for DashBoardBusLine {
             index+=1;
         }
         let text2 = self.make_line_info(index, now);
-        self.line = format!("{bn}: {text1} & {text2}")
+        self.line = format!("{bn} {text1}&{text2}");
+
+        let max_car_num  = 20;
+
+        if self.line.len() > max_car_num{
+            let first_20 = &self.line[0..max_car_num];
+            self.line = first_20.to_string();
+        } else {
+            let padding = max_car_num - self.line.len();
+            let supp_text =  " ".repeat(padding);
+            self.line += supp_text.as_str();
+        }
     }
 }
 
@@ -374,7 +388,10 @@ fn printooo(
     canvas.set_draw_color(Color::RGBA(195, 217, co_b as u8, 255));
     canvas.clear();
     let texture_creator = canvas.texture_creator();
-    let line_height = 160; // You might want to adjust this value
+    let line_height : i32 = 16 * SCALE_FACTOR as i32; // You might want to adjust this value
+
+    let mut pixels = vec![0; (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize];
+
     for (i, line) in lines.iter().enumerate() {
         // render a surface, and convert it to a texture bound to the canvas
 
@@ -382,7 +399,7 @@ fn printooo(
             .render(line.as_str())
             .blended(Color::RGBA(255, 0, 0, 255))
             .map_err(|e| e.to_string()).unwrap();
-        let texture = texture_creator
+        let mut texture = texture_creator
             .create_texture_from_surface(&surface)
             .map_err(|e| e.to_string()).unwrap();
 
@@ -405,6 +422,26 @@ fn printooo(
             println!("COPY ERROR");
         }
     }
+
+    let pixels_res = canvas.read_pixels(None, sdl2::pixels::PixelFormatEnum::RGBA8888);
+    if pixels_res.is_err() {
+        println!("cannot read pixels ");
+        return
+    }
+
+    pixels = pixels_res.unwrap();
+
+    let image_res =
+        RgbaImage::from_raw(
+            SCREEN_WIDTH as u32,
+            SCREEN_HEIGHT as u32,
+            pixels);
+    if image_res.is_none(){
+        return;
+    }
+    let image = image_res.unwrap();
+    let resized_img = image::imageops::resize(&image, 64*3, 64, FilterType::Nearest);
+    resized_img.save(Path::new("output.png")).unwrap();
 }
 
 
@@ -481,22 +518,22 @@ fn run(font_path: &Path) -> Result<(), String> {
     let mut page: DashBoardPage = DashBoardPage::new();
 
     page.add_sbb_line(
-        "T2|HB".to_string(),
+        "T2-HB".to_string(),
         "Zurich,Freihofstrasse".to_string(),
         "Zurich,Letzigrund".to_string(),
     );
     page.add_sbb_line(
-        "T3|HB".to_string(),
+        "T3-HB".to_string(),
         "Zurich, Siemens".to_string(),
         "Zurich, Hubertus".to_string(),
     );
     page.add_sbb_line(
-        "89|Alt".to_string(),
+        "89-Alt".to_string(),
         "Zurich,Kappeli".to_string(),
         "Zurich,Letzipark West".to_string(),
     );
     page.add_sbb_line(
-        "89|Oer".to_string(),
+        "89-Oer".to_string(),
         "Zurich,Albisrank".to_string(),
         "Zurich,Oerlikon".to_string(),
     );

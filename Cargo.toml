@@ -11,6 +11,7 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 #async-trait = "0.1.72"
+image = "0.24.6"
 [dependencies.sdl2]
 version = "0.35.2"
 default-features = false
