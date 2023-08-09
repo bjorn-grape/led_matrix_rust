@@ -2,6 +2,7 @@ extern crate sdl2;
 
 use std::cell::RefCell;
 use std::env;
+use std::future::IntoFuture;
 use std::path::Path;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -23,6 +24,7 @@ use tokio::time::Instant;
 use image::RgbaImage;
 use sdl2::pixels::PixelFormatEnum;
 use image::imageops::FilterType;
+use tokio::task::JoinHandle;
 
 const FPS: u32 = 1;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
@@ -69,6 +71,56 @@ struct CustomEventData {
 
 const URL_SBB: &str = "http://www.transport.opendata.ch/v1/connections?";
 
+struct Answer {
+    last_update: SystemTime,
+    result_list: Vec<URLResult>,
+}
+
+async fn update_request_content(request_content: URLRequest, last_update: SystemTime) -> Option<Answer> {
+    // let last_update_val = *last_update.lock().unwrap();
+    if last_update + Duration::from_secs(600) > SystemTime::now() {
+        return None;
+    }
+    let b_sta = &request_content.begin_station;
+    let e_sta = &request_content.end_station;
+    let limit = request_content.limit;
+    let mut ss = format!("{URL_SBB}from={b_sta}&to={e_sta}&limit={limit}");
+    for elm in &request_content.fields {
+        ss += &format!("&fields[]={elm}").as_str();
+    }
+    let resa = reqwest::get(&ss);
+    let res = resa.await;
+    if res.is_err() {
+        print!("Error sending GET request: {ss}");
+        return None;
+    }
+    let res_text = res.unwrap().text().await;
+    if res_text.is_err() {
+        print!("Error getting text from GET request: {ss}");
+        return None;
+    }
+
+    let text_to_parse = res_text.unwrap();
+    println!("{}", text_to_parse);
+    let conn_res = serde_json::from_str(text_to_parse.as_str());
+    if conn_res.is_err() {
+        println!("eee is {}", conn_res.err().unwrap());
+        return None;
+    }
+    let conn: Connections = conn_res.unwrap();
+
+    let url_results: Vec<URLResult> = conn.connections.iter()
+        .map(|c|
+            URLResult::new(c.from.departureTimestamp, c.from.delay))
+        .collect();
+
+    return Option::Some(Answer {
+        result_list: url_results,
+        last_update: SystemTime::now(),
+    });
+}
+
+#[derive(Clone)]
 struct URLRequest {
     begin_station: String,
     end_station: String,
@@ -76,6 +128,7 @@ struct URLRequest {
     limit: u32,
 }
 
+#[derive(Clone)]
 struct URLResult {
     timestamp: SystemTime,
     delay: Duration,
@@ -84,7 +137,7 @@ struct URLResult {
 
 impl URLResult {
     fn new(opt_departure: Option<u64>, opt_delay: Option<u32>) -> URLResult {
-        if opt_departure.is_none(){
+        if opt_departure.is_none() {
             return URLResult {
                 timestamp: SystemTime::now(),
                 delay: Duration::from_secs(0),
@@ -93,7 +146,7 @@ impl URLResult {
         }
 
         let mut delay = 0;
-        if  !opt_delay.is_none() {
+        if !opt_delay.is_none() {
             delay = opt_delay.unwrap();
         }
 
@@ -119,6 +172,7 @@ struct DashBoardBusLine {
     line: String,
     basename: String,
     last_update: SystemTime,
+    future_answer: Option<JoinHandle<Option<Answer>>>,
     color: [u8; 3],
 }
 
@@ -136,64 +190,43 @@ impl DashBoardBusLine {
 
                 limit: 10,
             },
+            result_list: vec![],
             line: "Not set".to_string(),
             basename: base_name,
-            result_list: vec![],
-            last_update: SystemTime::now() - Duration::from_secs(3600),
+
+            last_update:
+            SystemTime::now() - Duration::from_secs(3600)
+            ,
+            future_answer: None,
             color: [255, 255, 255],
         }
     }
 
-    async fn update(&mut self) {
-        if self.last_update + Duration::from_secs(600) > SystemTime::now() {
-            return;
-        }
-        let b_sta = &self.request_content.begin_station;
-        let e_sta = &self.request_content.end_station;
-        let limit = &self.request_content.limit;
-        let mut ss = format!("{URL_SBB}from={b_sta}&to={e_sta}&limit={limit}");
-        for elm in &self.request_content.fields {
-            ss += &format!("&fields[]={elm}").as_str();
-        }
-        let resa = reqwest::get(&ss);
-        let res = resa.await;
-        if res.is_err() {
-            print!("Error sending GET request: {ss}");
-            return;
-        }
-        let res_text = res.unwrap().text().await;
-        if res_text.is_err() {
-            print!("Error getting text from GET request: {ss}");
-            return;
-        }
-
-        let text_to_parse = res_text.unwrap();
-        println!("{}",text_to_parse);
-        let conn_res = serde_json::from_str(text_to_parse.as_str());
-        if conn_res.is_err() {
-            println!("eee is {}", conn_res.err().unwrap());
-            return;
-        }
-        let conn: Connections = conn_res.unwrap();
-
-        let url_results: Vec<URLResult> = conn.connections.iter()
-            .map(|c|
-                URLResult::new(c.from.departureTimestamp, c.from.delay))
-            .collect();
-
-        self.result_list = url_results;
-        self.last_update = SystemTime::now();
+    fn get_text(&self) -> String {
+        self.line.clone()
     }
 
-    fn make_line_info(&self, index :usize, now: SystemTime) -> String{
-        let mut acc ="".to_string();
+    fn get_color(&self) -> [u8; 3] {
+        self.color.clone()
+    }
+
+    fn make_line_info(&self, index: usize, now: SystemTime) -> String {
+        let mut acc = "".to_string();
         let bn = &self.basename;
 
-        if index >= self.result_list.len() {
+        let res_list_copy = self.result_list.clone();
+
+        if index >= res_list_copy.len() {
             acc = format!("{bn}: end reached update req!");
             return acc;
         }
-        let current_rr = &self.result_list[index];
+
+        let current_rr_res = &res_list_copy.get(index);
+        if current_rr_res.is_none() {
+            acc = format!("{bn}: out of bounds access!");
+            return acc;
+        }
+        let current_rr = current_rr_res.unwrap();
         let ts = current_rr.timestamp + current_rr.delay;
         let diff_dur_res = ts.duration_since(now);
         if diff_dur_res.is_err() {
@@ -211,6 +244,93 @@ impl DashBoardBusLine {
         }
         return acc;
     }
+
+    async fn update_text_field(&mut self) {
+        let copyyy = self.request_content.clone();
+        let last_upp = self.last_update.clone();
+        println!("update_text_field ");
+        if self.future_answer.is_none() {
+            let future = update_request_content(copyyy, last_upp);
+            // *self.last_update = SystemTime::now();
+            self.future_answer = Some(tokio::spawn(future));
+            // self.future_answer.unwrap().into_future().await;
+            println!("spawn future ");
+        } else if let Some(future_handle) = &mut self.future_answer {
+            println!("future_handle");
+            if future_handle.is_finished() {
+                // Run the future to completion
+
+                let option_answ = future_handle.into_future().await.unwrap();
+                match option_answ {
+                    Some(answ) => {
+                        self.last_update = answ.last_update;
+                        self.result_list = answ.result_list;
+                    }
+                    _ => {}
+                }
+                // self.last_update = result_answ.unwrap().;
+                self.future_answer = None;
+            }
+        }
+
+
+        // async_std::task::spawn(future);
+        // let result = rt.block_on(future);
+        // rt.
+        let res_list_copy = self.result_list.clone();
+        let now = SystemTime::now();
+        let mut index = 0;
+        for rr in &res_list_copy {
+            if rr.error {
+                index += 1;
+                continue;
+            }
+            let is_delay_passed = now > rr.timestamp + rr.delay;
+
+            if !is_delay_passed {
+                break;
+            }
+            index += 1;
+        }
+
+        let len_res_list = res_list_copy.len();
+
+
+        let bn = &self.basename;
+        if len_res_list == 0 {
+            self.line = format!("{bn}: len=0 update req!");
+            return;
+        }
+        while index < len_res_list {
+            if !res_list_copy[index].error {
+                break;
+            }
+            index += 1;
+        }
+
+        let text1 = self.make_line_info(index, now);
+
+        index += 1;
+        while index < len_res_list {
+            if !res_list_copy[index].error {
+                break;
+            }
+            index += 1;
+        }
+        let text2 = self.make_line_info(index, now);
+        self.line = format!("{bn} {text1}&{text2}");
+
+        let max_car_num = 20;
+
+        if self.line.len() > max_car_num {
+            let first_20 = &self.line[0..max_car_num];
+            self.line = first_20.to_string();
+        } else {
+            let padding = max_car_num - self.line.len();
+            let supp_text = " ".repeat(padding);
+            self.line += supp_text.as_str();
+        }
+    }
 }
 
 impl Printable for DashBoardLine {
@@ -223,79 +343,9 @@ impl Printable for DashBoardLine {
     fn update_text_field(&mut self) {}
 }
 
-impl Printable for DashBoardBusLine {
-    fn get_text(&self) -> String {
-        self.line.clone()
-    }
-
-    fn get_color(&self) -> [u8; 3] {
-        self.color.clone()
-    }
-
-
-
-    fn update_text_field(&mut self) {
-        let mut rt = Runtime::new().unwrap();
-        let future = self.update();
-        let result = rt.block_on(future);
-
-        let now = SystemTime::now();
-        let mut index = 0;
-        for rr in &self.result_list {
-            if rr.error {
-                index+=1;
-                continue;
-            }
-            let is_delay_passed = now > rr.timestamp + rr.delay;
-
-            if !is_delay_passed{
-                break;
-            }
-            index += 1;
-        }
-
-        let len_res_list = self.result_list.len();
-
-
-        let bn = &self.basename;
-        if self.result_list.len() == 0 {
-            self.line = format!("{bn}: len=0 update req!");
-            return;
-        }
-        while  index < len_res_list {
-            if ! self.result_list[index].error {
-                break;
-            }
-            index+=1;
-        }
-
-        let text1 = self.make_line_info(index, now);
-
-        index +=1;
-        while  index < len_res_list {
-            if ! self.result_list[index].error {
-                break;
-            }
-            index+=1;
-        }
-        let text2 = self.make_line_info(index, now);
-        self.line = format!("{bn} {text1}&{text2}");
-
-        let max_car_num  = 20;
-
-        if self.line.len() > max_car_num{
-            let first_20 = &self.line[0..max_car_num];
-            self.line = first_20.to_string();
-        } else {
-            let padding = max_car_num - self.line.len();
-            let supp_text =  " ".repeat(padding);
-            self.line += supp_text.as_str();
-        }
-    }
-}
 
 struct DashBoardPage {
-    lines: Vec<Box<dyn Printable>>,
+    lines: Vec<Box<DashBoardBusLine>>,
 }
 
 impl DashBoardPage {
@@ -327,11 +377,11 @@ impl DashBoard {
         self.pages.push(p);
     }
 
-    fn update_content(&mut self) {
+    async fn update_content(&mut self) {
         let mut page = &mut self.pages[self.curr_page];
         let lines = &mut page.lines;
         for i in 0..4 {
-            lines[i].update_text_field();
+            lines[i].update_text_field().await;
         }
     }
 
@@ -385,10 +435,10 @@ fn printooo(
     font: &sdl2::ttf::Font,
     co_b: i32,
 ) {
-    canvas.set_draw_color(Color::RGBA(195, 217, co_b as u8, 255));
+    canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
     canvas.clear();
     let texture_creator = canvas.texture_creator();
-    let line_height : i32 = 16 * SCALE_FACTOR as i32; // You might want to adjust this value
+    let line_height: i32 = 16 * SCALE_FACTOR as i32; // You might want to adjust this value
 
     let mut pixels = vec![0; (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize];
 
@@ -397,7 +447,7 @@ fn printooo(
 
         let surface = font
             .render(line.as_str())
-            .blended(Color::RGBA(255, 0, 0, 255))
+            .blended(Color::RGBA(255, 255, 255, 255))
             .map_err(|e| e.to_string()).unwrap();
         let mut texture = texture_creator
             .create_texture_from_surface(&surface)
@@ -426,7 +476,7 @@ fn printooo(
     let pixels_res = canvas.read_pixels(None, sdl2::pixels::PixelFormatEnum::RGBA8888);
     if pixels_res.is_err() {
         println!("cannot read pixels ");
-        return
+        return;
     }
 
     pixels = pixels_res.unwrap();
@@ -436,11 +486,11 @@ fn printooo(
             SCREEN_WIDTH as u32,
             SCREEN_HEIGHT as u32,
             pixels);
-    if image_res.is_none(){
+    if image_res.is_none() {
         return;
     }
     let image = image_res.unwrap();
-    let resized_img = image::imageops::resize(&image, 64*3, 64, FilterType::Nearest);
+    let resized_img = image::imageops::resize(&image, 64 * 3, 64, FilterType::Nearest);
     resized_img.save(Path::new("output.png")).unwrap();
 }
 
@@ -490,7 +540,7 @@ fn update(mut sdl_context: &sdl2::Sdl,
 //     event_pump.push_event(custom_event).expect("Failed to push custom event");
 // }
 
-fn run(font_path: &Path) -> Result<(), String> {
+async fn run(font_path: &Path) -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsys = sdl_context.video()?;
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
@@ -555,7 +605,7 @@ fn run(font_path: &Path) -> Result<(), String> {
         }
         indexx -= 10;
 
-        dbl.update_content();
+        dbl.update_content().await;
         let lines = dbl.get_content();
 
         // Render your game here...
@@ -589,7 +639,8 @@ fn run(font_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn main() -> Result<(), String> {
+#[tokio::main]
+async fn main() -> Result<(), String> {
     let args: Vec<_> = env::args().collect();
 
     println!("linked sdl2_ttf: {}", sdl2::ttf::get_linked_version());
@@ -599,7 +650,7 @@ fn main() -> Result<(), String> {
     } else {
         let path: &Path = Path::new(&args[1]);
 
-        run(path)?;
+        run(path).await.unwrap();
     }
 
     Ok(())
