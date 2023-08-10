@@ -1,5 +1,6 @@
 extern crate sdl2;
 
+use std::arch::x86_64::_xsavec64;
 use std::cell::RefCell;
 use std::env;
 use std::future::IntoFuture;
@@ -25,9 +26,10 @@ use image::RgbaImage;
 use sdl2::pixels::PixelFormatEnum;
 use image::imageops::FilterType;
 use tokio::task::JoinHandle;
+use chrono::{Local, Datelike, Timelike};
 
 const FPS: u32 = 30;
-const STEP: u32 = 16;
+const STEP: u32 = 32;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
 const SECOND_NUM_WAIT: u32 = 2;
 
@@ -35,8 +37,12 @@ const SCALE_FACTOR: u32 = 8;
 static SCREEN_WIDTH: u32 = 64 * 3 * SCALE_FACTOR;
 static SCREEN_HEIGHT: u32 = 64 * SCALE_FACTOR;
 const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
-const LINE_HEIGHT: i32 = 16 * SCALE_FACTOR as i32; // You might want to adjust this value
+const LINE_HEIGHT: i32 = 16 * SCALE_FACTOR as i32;
 
+const TOTAL_CHAR_WIDTH: usize = 24;
+// You might want to adjust this value
+// 10 minutes
+const REFRESH_INFERVAL: Duration = Duration::from_secs(60 * 10);
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Connection {
@@ -92,11 +98,38 @@ struct Answer {
     result_list: Vec<URLResult>,
 }
 
+fn get_formatted_time() -> String {
+    let now = Local::now();
+
+    let month = now.month();
+    let day = now.day();
+    let hour = now.hour();
+    let minute = now.minute();
+    let second = now.second();
+
+    let month_str = match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => "",
+    };
+
+    let formatted_time = format!("{:}-{:02} {}:{:02}:{:02}", month_str, day, hour, minute, second);
+    return formatted_time;
+}
+
 async fn update_request_content(request_content: URLRequest, last_update: SystemTime) -> Option<Answer> {
     // let last_update_val = *last_update.lock().unwrap();
-    if last_update + Duration::from_secs(600) > SystemTime::now() {
-        return None;
-    }
+
     let b_sta = &request_content.begin_station;
     let e_sta = &request_content.end_station;
     let limit = request_content.limit;
@@ -210,12 +243,12 @@ struct DashBoardBusLine {
     basename: String,
     last_update: SystemTime,
     future_answer: Option<JoinHandle<Option<Answer>>>,
-    color: (u8,u8,u8),
+    color: (u8, u8, u8),
 }
 
 
 impl DashBoardBusLine {
-    fn new(begin_station: String, end_station: String, base_name: String, color: (u8,u8,u8)) -> DashBoardBusLine {
+    fn new(begin_station: String, end_station: String, base_name: String, color: (u8, u8, u8)) -> DashBoardBusLine {
         DashBoardBusLine {
             request_content: URLRequest {
                 begin_station,
@@ -231,7 +264,7 @@ impl DashBoardBusLine {
             },
             result_list: vec![],
             lines: vec![],
-            basename: add_20_padding_or_cut(base_name),
+            basename: add_N_padding_or_cut(base_name, TOTAL_CHAR_WIDTH),
 
             last_update:
             SystemTime::now() - Duration::from_secs(3600)
@@ -250,7 +283,7 @@ impl DashBoardBusLine {
         return res;
     }
 
-    fn get_color(&self) -> (u8,u8,u8) {
+    fn get_color(&self) -> (u8, u8, u8) {
         self.color.clone()
     }
 
@@ -301,14 +334,16 @@ impl DashBoardBusLine {
         let last_upp = self.last_update.clone();
         println!("update_text_field ");
         if self.future_answer.is_none() {
-            let future = update_request_content(copyyy, last_upp);
-            // *self.last_update = SystemTime::now();
-            self.future_answer = Some(tokio::spawn(future));
-            // self.future_answer.unwrap().into_future().await;
-            println!("spawn future ");
+            if last_upp + REFRESH_INFERVAL > SystemTime::now() {} else {
+                let future = update_request_content(copyyy, last_upp);
+                // *self.last_update = SystemTime::now();
+                self.future_answer = Some(tokio::spawn(future));
+                // self.future_answer.unwrap().into_future().await;
+                println!("spawn future ");
+            }
         } else if let Some(future_handle) = &mut self.future_answer {
-            println!("future_handle");
             if future_handle.is_finished() {
+                println!("future_handle");
                 // Run the future to completion
 
                 let option_answ = future_handle.into_future().await.unwrap();
@@ -349,26 +384,29 @@ impl DashBoardBusLine {
             return;
         }
         self.lines.clear();
-        for i in 0..3 {
-            while index < len_res_list {
-                if !res_list_copy[index].error {
-                    break;
+        for i in 0..2 {
+            let mut text_acc: String = "".to_string();
+            for j in 0..2 {
+                while index < len_res_list {
+                    if !res_list_copy[index].error {
+                        break;
+                    }
+                    index += 1;
                 }
+
+                let mut text1 = self.make_line_info(index, now);
+
+                let text = add_N_padding_or_cut(text1, TOTAL_CHAR_WIDTH / 2);
+
+                text_acc += text.as_str();
                 index += 1;
             }
-
-            let mut text1 = self.make_line_info(index, now);
-
-            let text = add_20_padding_or_cut(text1);
-
-            self.lines.push(text);
-            index += 1;
+            self.lines.push(text_acc);
         }
     }
 }
 
-fn add_20_padding_or_cut(text1: String) -> String {
-    let max_car_num = 20;
+fn add_N_padding_or_cut(text1: String, max_car_num: usize) -> String {
     let mut text_res;
     if text1.len() > max_car_num {
         let first_20 = &text1[0..max_car_num];
@@ -403,7 +441,7 @@ impl DashBoardPage {
     }
 
     fn add_sbb_entry(&mut self, base_name: String, begin: String, end: String,
-                     color: (u8,u8,u8)) {
+                     color: (u8, u8, u8)) {
         let line = DashBoardBusLine::new(begin, end, base_name, color);
         self.sbb_entry.push(Box::new(line));
     }
@@ -414,7 +452,8 @@ impl DashBoardPage {
     }
 
     fn get_current_size(&self) -> usize {
-        return 1 + self.sbb_entry.len();
+        let index = self.current_index;
+        return self.sbb_entry[index].lines.len() + 2;
     }
 
     fn get_current_entry(&self) -> &DashBoardBusLine {
@@ -435,11 +474,11 @@ struct DashBoard {
 
 struct DisplayLineData {
     text: String,
-    color: (u8,u8,u8),
+    color: (u8, u8, u8),
 }
 
 impl DisplayLineData {
-    fn new(name: String, color: (u8,u8,u8)) -> DisplayLineData {
+    fn new(name: String, color: (u8, u8, u8)) -> DisplayLineData {
         DisplayLineData { text: name, color }
     }
 }
@@ -459,8 +498,8 @@ impl DashBoard {
     async fn update_content(&mut self) {
         let mut page = &mut self.pages[self.curr_page];
         let lines = &mut page.sbb_entry;
-        for i in 0..4 {
-            lines[i].update_text_field().await;
+        for elm in lines {
+            elm.update_text_field().await;
         }
     }
 
@@ -474,6 +513,11 @@ impl DashBoard {
             return vec;
         }
         let page: &DashBoardPage = &self.pages[self.curr_page];
+        let ftime = add_N_padding_or_cut(format!("[{}]", get_formatted_time()), 24);
+        vec.push(DisplayLineData::new(
+            ftime.clone(),
+            (255, 150, 255),
+        ));
         let sbb_entry_1 = page.get_current_entry();
         vec.push(DisplayLineData::new(
             sbb_entry_1.basename.clone(),
@@ -485,6 +529,10 @@ impl DashBoard {
                 sbb_entry_1.get_color(),
             ));
         }
+        vec.push(DisplayLineData::new(
+            ftime.clone(),
+            (255, 150, 255),
+        ));
 
         let sbb_entry_2 = page.get_next_entry();
         vec.push(DisplayLineData::new(
@@ -543,7 +591,6 @@ fn printooo(
     font: &sdl2::ttf::Font,
     co_b: i32,
 ) {
-    // canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
     canvas.clear();
     let texture_creator = canvas.texture_creator();
 
@@ -552,10 +599,10 @@ fn printooo(
     for (i, line) in lines.iter().enumerate() {
         // render a surface, and convert it to a texture bound to the canvas
 
-        let (r,g,b) =  line.color;
+        let (r, g, b) = line.color;
         let surface = font
             .render(line.text.as_str())
-            .blended(Color::RGBA(r,g,b, 255))
+            .blended(Color::RGBA(r, g, b, 255))
             .map_err(|e| e.to_string()).unwrap();
         let mut texture = texture_creator
             .create_texture_from_surface(&surface)
@@ -688,6 +735,13 @@ async fn run(font_path: &Path) -> Result<(), String> {
         (255, 0, 255),
     );
 
+    page.add_sbb_entry(
+        "HB => Geneve".to_string(),
+        "Zurich,HB".to_string(),
+        "Geneve".to_string(),
+        (255, 255, 0),
+    );
+
     dbl.add_page(page);
     let mut index_f = 0;
     loop {
@@ -699,7 +753,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
 
         update(&sdl_context, &mut indexx, &mut alive);
 
-        let mini = LINE_HEIGHT * (dbl.get_curr_page_size() - 1) as i32 * -1 ;
+        let mini = LINE_HEIGHT * (dbl.get_curr_page_size()) as i32 * -1;
         if indexx < mini + STEP as i32 {
             indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
             dbl.move_next_page_element();
