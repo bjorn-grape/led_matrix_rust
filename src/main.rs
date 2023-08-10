@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use std::string::ToString;
 use reqwest::Error;
-use sdl2::libc::time;
+use sdl2::libc::{clone, time};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::time::Instant;
@@ -26,24 +26,40 @@ use sdl2::pixels::PixelFormatEnum;
 use image::imageops::FilterType;
 use tokio::task::JoinHandle;
 
-const FPS: u32 = 1;
+const FPS: u32 = 30;
+const STEP: u32 = 16;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
+const SECOND_NUM_WAIT: u32 = 2;
 
 const SCALE_FACTOR: u32 = 8;
 static SCREEN_WIDTH: u32 = 64 * 3 * SCALE_FACTOR;
 static SCREEN_HEIGHT: u32 = 64 * SCALE_FACTOR;
 const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
+const LINE_HEIGHT: i32 = 16 * SCALE_FACTOR as i32; // You might want to adjust this value
 
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Connection {
     from: Departure,
+    sections: Vec<Section>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Departure {
     departureTimestamp: Option<u64>,
     delay: Option<u32>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Section {
+    journey: Option<Journey>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Journey {
+    category: String,
+    number: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -90,6 +106,7 @@ async fn update_request_content(request_content: URLRequest, last_update: System
     }
     let resa = reqwest::get(&ss);
     let res = resa.await;
+    println!("{}", &ss);
     if res.is_err() {
         print!("Error sending GET request: {ss}");
         return None;
@@ -110,8 +127,25 @@ async fn update_request_content(request_content: URLRequest, last_update: System
     let conn: Connections = conn_res.unwrap();
 
     let url_results: Vec<URLResult> = conn.connections.iter()
-        .map(|c|
-            URLResult::new(c.from.departureTimestamp, c.from.delay))
+        .map(|c| {
+            let mut curr_index = 0;
+            let len = c.sections.len();
+            while curr_index < len {
+                if c.sections[curr_index].journey.is_some() {
+                    break;
+                }
+                curr_index += 1;
+            }
+            let mut name = "err".to_string();
+            if curr_index < len {
+                let jn = ((c.sections[curr_index].journey).as_ref()).unwrap();
+                name = format!("{}{}", jn.category, jn.number);
+            }
+
+            return URLResult::new(c.from.departureTimestamp, c.from.delay,
+                                  name);
+        }
+        )
         .collect();
 
     return Option::Some(Answer {
@@ -132,15 +166,17 @@ struct URLRequest {
 struct URLResult {
     timestamp: SystemTime,
     delay: Duration,
+    transport_name: String,
     error: bool,
 }
 
 impl URLResult {
-    fn new(opt_departure: Option<u64>, opt_delay: Option<u32>) -> URLResult {
+    fn new(opt_departure: Option<u64>, opt_delay: Option<u32>, transport_name: String) -> URLResult {
         if opt_departure.is_none() {
             return URLResult {
                 timestamp: SystemTime::now(),
                 delay: Duration::from_secs(0),
+                transport_name,
                 error: true,
             };
         }
@@ -155,6 +191,7 @@ impl URLResult {
         URLResult {
             timestamp: instant,
             delay: Duration::from_secs(delay as u64 * 60),
+            transport_name: transport_name,
             error: false,
         }
     }
@@ -169,7 +206,7 @@ struct DashBoardLine {
 struct DashBoardBusLine {
     request_content: URLRequest,
     result_list: Vec<URLResult>,
-    line: String,
+    lines: Vec<String>,
     basename: String,
     last_update: SystemTime,
     future_answer: Option<JoinHandle<Option<Answer>>>,
@@ -186,13 +223,15 @@ impl DashBoardBusLine {
                 fields: vec![
                     "connections/from/departureTimestamp".to_string(),
                     "connections/from/delay".to_string(),
+                    "connections/sections/journey/category".to_string(),
+                    "connections/sections/journey/number".to_string(),
                 ],
 
                 limit: 10,
             },
             result_list: vec![],
-            line: "Not set".to_string(),
-            basename: base_name,
+            lines: vec![],
+            basename: add_20_padding_or_cut(base_name),
 
             last_update:
             SystemTime::now() - Duration::from_secs(3600)
@@ -202,8 +241,13 @@ impl DashBoardBusLine {
         }
     }
 
-    fn get_text(&self) -> String {
-        self.line.clone()
+    fn get_text(&self) -> Vec<String> {
+        let mut res = Vec::new();
+        res.push(self.basename.clone());
+        for elm in &self.lines {
+            res.push(elm.clone());
+        }
+        return res;
     }
 
     fn get_color(&self) -> [u8; 3] {
@@ -212,7 +256,7 @@ impl DashBoardBusLine {
 
     fn make_line_info(&self, index: usize, now: SystemTime) -> String {
         let mut acc = "".to_string();
-        let bn = &self.basename;
+        let bn = "err";
 
         let res_list_copy = self.result_list.clone();
 
@@ -234,9 +278,16 @@ impl DashBoardBusLine {
             return acc;
         }
         let diff_dur = diff_dur_res.unwrap();
-        let minutes = diff_dur.as_secs() / 60;
+        let mut minutes = diff_dur.as_secs() / 60;
         let seconds = diff_dur.as_secs() % 60;
-        acc = format!("{minutes}:{seconds}");
+        let name = &current_rr.transport_name;
+        if minutes < 60 {
+            acc = format!("{name} {minutes}:{seconds:02}");
+        } else {
+            let hours = minutes / 60;
+            minutes %= 60;
+            acc = format!("{name} {hours}:{minutes:02}:{seconds:02}");
+        }
 
         let delay = current_rr.delay.as_secs() / 60;
         if delay != 0 {
@@ -273,10 +324,6 @@ impl DashBoardBusLine {
             }
         }
 
-
-        // async_std::task::spawn(future);
-        // let result = rt.block_on(future);
-        // rt.
         let res_list_copy = self.result_list.clone();
         let now = SystemTime::now();
         let mut index = 0;
@@ -298,39 +345,40 @@ impl DashBoardBusLine {
 
         let bn = &self.basename;
         if len_res_list == 0 {
-            self.line = format!("{bn}: len=0 update req!");
+            self.lines.push(format!("{bn}: len=0 update req!"));
             return;
         }
-        while index < len_res_list {
-            if !res_list_copy[index].error {
-                break;
+        self.lines.clear();
+        for i in 0..3 {
+            while index < len_res_list {
+                if !res_list_copy[index].error {
+                    break;
+                }
+                index += 1;
             }
+
+            let mut text1 = self.make_line_info(index, now);
+
+            let text = add_20_padding_or_cut(text1);
+
+            self.lines.push(text);
             index += 1;
-        }
-
-        let text1 = self.make_line_info(index, now);
-
-        index += 1;
-        while index < len_res_list {
-            if !res_list_copy[index].error {
-                break;
-            }
-            index += 1;
-        }
-        let text2 = self.make_line_info(index, now);
-        self.line = format!("{bn} {text1}&{text2}");
-
-        let max_car_num = 20;
-
-        if self.line.len() > max_car_num {
-            let first_20 = &self.line[0..max_car_num];
-            self.line = first_20.to_string();
-        } else {
-            let padding = max_car_num - self.line.len();
-            let supp_text = " ".repeat(padding);
-            self.line += supp_text.as_str();
         }
     }
+}
+
+fn add_20_padding_or_cut(text1: String) -> String {
+    let max_car_num = 24;
+    let mut text_res;
+    if text1.len() > max_car_num {
+        let first_20 = &text1[0..max_car_num];
+        text_res = first_20.to_string();
+    } else {
+        let padding = max_car_num - text1.len();
+        let supp_text = " ".repeat(padding);
+        text_res = text1 + supp_text.as_str();
+    }
+    text_res
 }
 
 impl Printable for DashBoardLine {
@@ -345,17 +393,37 @@ impl Printable for DashBoardLine {
 
 
 struct DashBoardPage {
-    lines: Vec<Box<DashBoardBusLine>>,
+    sbb_entry: Vec<Box<DashBoardBusLine>>,
+    current_index: usize,
 }
 
 impl DashBoardPage {
     fn new() -> DashBoardPage {
-        DashBoardPage { lines: vec![] }
+        DashBoardPage { sbb_entry: vec![], current_index: 0 }
     }
 
-    fn add_sbb_line(&mut self, base_name: String, begin: String, end: String) {
+    fn add_sbb_entry(&mut self, base_name: String, begin: String, end: String) {
         let line = DashBoardBusLine::new(begin, end, base_name);
-        self.lines.push(Box::new(line));
+        self.sbb_entry.push(Box::new(line));
+    }
+
+    fn move_to_next_sbb_entry(&mut self) {
+        let index = (self.current_index + 1) % self.sbb_entry.len();
+        self.current_index = index;
+    }
+
+    fn get_current_size(&self) -> usize {
+        return 1 + self.sbb_entry.len();
+    }
+
+    fn get_current_entry(&self) -> &DashBoardBusLine {
+        let index = self.current_index;
+        return &self.sbb_entry[index];
+    }
+
+    fn get_next_entry(&self) -> &DashBoardBusLine {
+        let index = (self.current_index + 1) % self.sbb_entry.len();
+        return &self.sbb_entry[index];
     }
 }
 
@@ -379,7 +447,7 @@ impl DashBoard {
 
     async fn update_content(&mut self) {
         let mut page = &mut self.pages[self.curr_page];
-        let lines = &mut page.lines;
+        let lines = &mut page.sbb_entry;
         for i in 0..4 {
             lines[i].update_text_field().await;
         }
@@ -395,12 +463,27 @@ impl DashBoard {
             return vec;
         }
         let page: &DashBoardPage = &self.pages[self.curr_page];
-        let lines = &page.lines;
-        for i in 0..4 {
-            let todisp = lines[i].get_text();
-            vec.push(todisp);
+        let sbb_entry_1 = page.get_current_entry();
+        vec.push(sbb_entry_1.basename.clone());
+        for elm in &sbb_entry_1.lines {
+            vec.push(elm.clone());
+        }
+        let sbb_entry_2 = page.get_next_entry();
+        vec.push(sbb_entry_2.basename.clone());
+        for elm in &sbb_entry_2.lines {
+            vec.push(elm.clone());
         }
         return vec;
+    }
+
+    fn get_curr_page_size(&self) -> usize {
+        let page: &DashBoardPage = &self.pages[self.curr_page];
+        return page.get_current_size();
+    }
+
+    fn move_next_page_element(&mut self) {
+        let mut page = &mut self.pages[self.curr_page];
+        return page.move_to_next_sbb_entry();
     }
 }
 
@@ -438,7 +521,6 @@ fn printooo(
     canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
     canvas.clear();
     let texture_creator = canvas.texture_creator();
-    let line_height: i32 = 16 * SCALE_FACTOR as i32; // You might want to adjust this value
 
     let mut pixels = vec![0; (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize];
 
@@ -463,9 +545,12 @@ fn printooo(
             SCREEN_WIDTH - padding,
             SCREEN_HEIGHT - padding,
         );
-
+        let mut change_val = 0;
+        if co_b < 0 {
+            change_val = co_b;
+        }
         // Offset target rect to the correct line
-        let target = Rect::new(0, 0 + i as i32 * line_height, target.width(), target.height());
+        let target = Rect::new(0, 0 + i as i32 * LINE_HEIGHT + change_val, target.width(), target.height());
 
         let aa = canvas.copy(&texture, None, Some(target));
         if aa.is_err() {
@@ -491,7 +576,7 @@ fn printooo(
     }
     let image = image_res.unwrap();
     let resized_img = image::imageops::resize(&image, 64 * 3, 64, FilterType::Nearest);
-    resized_img.save(Path::new("output.png")).unwrap();
+    // resized_img.save(Path::new("output.png")).unwrap();
 }
 
 
@@ -525,21 +610,6 @@ fn update(mut sdl_context: &sdl2::Sdl,
     }
 }
 
-// fn push_custom_event(event_pump: &EventPump) {
-//     // Create your custom event here, for example, a custom event with type 1234
-//     let custom_event = Event::User {
-//         timestamp: 0,
-//         window_id: 0,
-//         type_: 1234, // You can use any custom integer value here
-//         code: 0,
-//         data1: std::ptr::null_mut(),
-//         data2: std::ptr::null_mut(),
-//     };
-//
-//     // Push the custom event into the event queue
-//     event_pump.push_event(custom_event).expect("Failed to push custom event");
-// }
-
 async fn run(font_path: &Path) -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsys = sdl_context.video()?;
@@ -560,32 +630,32 @@ async fn run(font_path: &Path) -> Result<(), String> {
     let event_subsystem = sdl_context.event()?;
     let event_subsystem_arc = Arc::new(Mutex::new(event_subsystem));
 
-    let mut indexx = 50;
+    let mut indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
     let mut last_frame_time = SystemTime::now();
     let mut alive = true;
 
     let mut dbl: DashBoard = DashBoard::new();
     let mut page: DashBoardPage = DashBoardPage::new();
 
-    page.add_sbb_line(
-        "T2-HB".to_string(),
+    page.add_sbb_entry(
+        "Freihofstrasse => HB".to_string(),
         "Zurich,Freihofstrasse".to_string(),
         "Zurich,Letzigrund".to_string(),
     );
-    page.add_sbb_line(
-        "T3-HB".to_string(),
+    page.add_sbb_entry(
+        "Siemens => HB".to_string(),
         "Zurich, Siemens".to_string(),
-        "Zurich, Hubertus".to_string(),
+        "Zurich, HB".to_string(),
     );
-    page.add_sbb_line(
-        "89-Alt".to_string(),
+    page.add_sbb_entry(
+        "Kappeli => Altstatten".to_string(),
         "Zurich,Kappeli".to_string(),
         "Zurich,Letzipark West".to_string(),
     );
-    page.add_sbb_line(
-        "89-Oer".to_string(),
+    page.add_sbb_entry(
+        "Albisrank => Hardbrucke".to_string(),
         "Zurich,Albisrank".to_string(),
-        "Zurich,Oerlikon".to_string(),
+        "Zurich,Hardbrucke".to_string(),
     );
 
     dbl.add_page(page);
@@ -597,13 +667,14 @@ async fn run(font_path: &Path) -> Result<(), String> {
         // Calculate the elapsed time since the last frame
         let elapsed = last_frame_time.elapsed();
 
-        // Update your game logic here...
         update(&sdl_context, &mut indexx, &mut alive);
 
-        if indexx < 10 {
-            indexx = 255;
+        let mini = LINE_HEIGHT * -4;
+        if indexx < mini + STEP as i32 {
+            indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
+            dbl.move_next_page_element();
         }
-        indexx -= 10;
+        indexx -= STEP as i32;
 
         dbl.update_content().await;
         let lines = dbl.get_content();
@@ -619,7 +690,6 @@ async fn run(font_path: &Path) -> Result<(), String> {
             let remaining_time = FRAME_TIME.checked_sub(elapsed.unwrap());
 
             // If there's remaining time, sleep for that duration
-            // print!("\r");
             if let Some(remaining) = remaining_time {
                 thread::sleep(remaining);
             }
@@ -649,7 +719,6 @@ async fn main() -> Result<(), String> {
         println!("Usage: ./demo font.[ttf|ttc|fon]")
     } else {
         let path: &Path = Path::new(&args[1]);
-
         run(path).await.unwrap();
     }
 
