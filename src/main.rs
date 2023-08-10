@@ -210,12 +210,12 @@ struct DashBoardBusLine {
     basename: String,
     last_update: SystemTime,
     future_answer: Option<JoinHandle<Option<Answer>>>,
-    color: [u8; 3],
+    color: (u8,u8,u8),
 }
 
 
 impl DashBoardBusLine {
-    fn new(begin_station: String, end_station: String, base_name: String) -> DashBoardBusLine {
+    fn new(begin_station: String, end_station: String, base_name: String, color: (u8,u8,u8)) -> DashBoardBusLine {
         DashBoardBusLine {
             request_content: URLRequest {
                 begin_station,
@@ -237,7 +237,7 @@ impl DashBoardBusLine {
             SystemTime::now() - Duration::from_secs(3600)
             ,
             future_answer: None,
-            color: [255, 255, 255],
+            color: color,
         }
     }
 
@@ -250,7 +250,7 @@ impl DashBoardBusLine {
         return res;
     }
 
-    fn get_color(&self) -> [u8; 3] {
+    fn get_color(&self) -> (u8,u8,u8) {
         self.color.clone()
     }
 
@@ -368,7 +368,7 @@ impl DashBoardBusLine {
 }
 
 fn add_20_padding_or_cut(text1: String) -> String {
-    let max_car_num = 24;
+    let max_car_num = 20;
     let mut text_res;
     if text1.len() > max_car_num {
         let first_20 = &text1[0..max_car_num];
@@ -402,8 +402,9 @@ impl DashBoardPage {
         DashBoardPage { sbb_entry: vec![], current_index: 0 }
     }
 
-    fn add_sbb_entry(&mut self, base_name: String, begin: String, end: String) {
-        let line = DashBoardBusLine::new(begin, end, base_name);
+    fn add_sbb_entry(&mut self, base_name: String, begin: String, end: String,
+                     color: (u8,u8,u8)) {
+        let line = DashBoardBusLine::new(begin, end, base_name, color);
         self.sbb_entry.push(Box::new(line));
     }
 
@@ -432,6 +433,16 @@ struct DashBoard {
     curr_page: usize,
 }
 
+struct DisplayLineData {
+    text: String,
+    color: (u8,u8,u8),
+}
+
+impl DisplayLineData {
+    fn new(name: String, color: (u8,u8,u8)) -> DisplayLineData {
+        DisplayLineData { text: name, color }
+    }
+}
 
 impl DashBoard {
     fn new() -> DashBoard {
@@ -453,26 +464,40 @@ impl DashBoard {
         }
     }
 
-    fn get_content(&self) -> Vec<String> {
+    fn get_content(&self) -> Vec<DisplayLineData> {
         let mut vec = Vec::new();
         if self.curr_page >= self.pages.len() {
             let cp = self.curr_page;
             for i in 0..4 {
-                vec.push(format!("page {cp} missing"));
+                vec.push(DisplayLineData::new(format!("page {cp} missing"), (255, 255, 255)));
             }
             return vec;
         }
         let page: &DashBoardPage = &self.pages[self.curr_page];
         let sbb_entry_1 = page.get_current_entry();
-        vec.push(sbb_entry_1.basename.clone());
+        vec.push(DisplayLineData::new(
+            sbb_entry_1.basename.clone(),
+            sbb_entry_1.get_color(),
+        ));
         for elm in &sbb_entry_1.lines {
-            vec.push(elm.clone());
+            vec.push(DisplayLineData::new(
+                elm.clone(),
+                sbb_entry_1.get_color(),
+            ));
         }
+
         let sbb_entry_2 = page.get_next_entry();
-        vec.push(sbb_entry_2.basename.clone());
+        vec.push(DisplayLineData::new(
+            sbb_entry_2.basename.clone(),
+            sbb_entry_2.get_color(),
+        ));
         for elm in &sbb_entry_2.lines {
-            vec.push(elm.clone());
+            vec.push(DisplayLineData::new(
+                elm.clone(),
+                sbb_entry_2.get_color(),
+            ));
         }
+
         return vec;
     }
 
@@ -514,11 +539,11 @@ fn get_centered_rect(rect_width: u32, rect_height: u32, cons_width: u32, cons_he
 
 fn printooo(
     canvas: &mut WindowCanvas,
-    lines: &Vec<String>,
+    lines: &Vec<DisplayLineData>,
     font: &sdl2::ttf::Font,
     co_b: i32,
 ) {
-    canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
+    // canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
     canvas.clear();
     let texture_creator = canvas.texture_creator();
 
@@ -527,9 +552,10 @@ fn printooo(
     for (i, line) in lines.iter().enumerate() {
         // render a surface, and convert it to a texture bound to the canvas
 
+        let (r,g,b) =  line.color;
         let surface = font
-            .render(line.as_str())
-            .blended(Color::RGBA(255, 255, 255, 255))
+            .render(line.text.as_str())
+            .blended(Color::RGBA(r,g,b, 255))
             .map_err(|e| e.to_string()).unwrap();
         let mut texture = texture_creator
             .create_texture_from_surface(&surface)
@@ -576,7 +602,7 @@ fn printooo(
     }
     let image = image_res.unwrap();
     let resized_img = image::imageops::resize(&image, 64 * 3, 64, FilterType::Nearest);
-    // resized_img.save(Path::new("output.png")).unwrap();
+    resized_img.save(Path::new("output.png")).unwrap();
 }
 
 
@@ -641,21 +667,25 @@ async fn run(font_path: &Path) -> Result<(), String> {
         "Freihofstrasse => HB".to_string(),
         "Zurich,Freihofstrasse".to_string(),
         "Zurich,Letzigrund".to_string(),
+        (255, 0, 0),
     );
     page.add_sbb_entry(
         "Siemens => HB".to_string(),
         "Zurich, Siemens".to_string(),
         "Zurich, HB".to_string(),
+        (0, 255, 0),
     );
     page.add_sbb_entry(
         "Kappeli => Altstatten".to_string(),
         "Zurich,Kappeli".to_string(),
         "Zurich,Letzipark West".to_string(),
+        (0, 255, 255),
     );
     page.add_sbb_entry(
         "Albisrank => Hardbrucke".to_string(),
         "Zurich,Albisrank".to_string(),
         "Zurich,Hardbrucke".to_string(),
+        (255, 0, 255),
     );
 
     dbl.add_page(page);
@@ -669,7 +699,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
 
         update(&sdl_context, &mut indexx, &mut alive);
 
-        let mini = LINE_HEIGHT * -4;
+        let mini = LINE_HEIGHT * (dbl.get_curr_page_size() - 1) as i32 * -1 ;
         if indexx < mini + STEP as i32 {
             indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
             dbl.move_next_page_element();
