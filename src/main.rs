@@ -1,7 +1,5 @@
 extern crate sdl2;
 
-use std::arch::x86_64::_xsavec64;
-use std::cell::RefCell;
 use std::env;
 use std::future::IntoFuture;
 use std::path::Path;
@@ -11,19 +9,12 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::{TextureQuery, WindowCanvas};
 use std::thread;
-use std::ptr;
-use std::sync::{Arc, Mutex};
-use sdl2::sys::SDL_EventType;
+// use sdl2::sys::SDL_EventType;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use std::string::ToString;
-use reqwest::Error;
-use sdl2::libc::{clone, time};
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Runtime;
-use tokio::time::Instant;
 use image::RgbaImage;
-use sdl2::pixels::PixelFormatEnum;
 use image::imageops::FilterType;
 use tokio::task::JoinHandle;
 use chrono::{Local, Datelike, Timelike};
@@ -36,7 +27,7 @@ const SECOND_NUM_WAIT: u32 = 2;
 const SCALE_FACTOR: u32 = 8;
 static SCREEN_WIDTH: u32 = 64 * 3 * SCALE_FACTOR;
 static SCREEN_HEIGHT: u32 = 64 * SCALE_FACTOR;
-const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
+// const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
 const LINE_HEIGHT: i32 = 16 * SCALE_FACTOR as i32;
 
 const TOTAL_CHAR_WIDTH: usize = 24;
@@ -86,10 +77,10 @@ trait Printable {
     fn update_text_field(&mut self);
 }
 
-struct CustomEventData {
-    // Put your custom data fields here
-    message: String,
-}
+// struct CustomEventData {
+//     // Put your custom data fields here
+//     message: String,
+// }
 
 const URL_SBB: &str = "http://www.transport.opendata.ch/v1/connections?";
 
@@ -127,7 +118,7 @@ fn get_formatted_time() -> String {
     return formatted_time;
 }
 
-async fn update_request_content(request_content: URLRequest, last_update: SystemTime) -> Option<Answer> {
+async fn update_request_content(request_content: URLRequest) -> Option<Answer> {
     // let last_update_val = *last_update.lock().unwrap();
 
     let b_sta = &request_content.begin_station;
@@ -274,46 +265,43 @@ impl DashBoardBusLine {
         }
     }
 
-    fn get_text(&self) -> Vec<String> {
-        let mut res = Vec::new();
-        res.push(self.basename.clone());
-        for elm in &self.lines {
-            res.push(elm.clone());
-        }
-        return res;
-    }
+    // fn get_text(&self) -> Vec<String> {
+    //     let mut res = Vec::new();
+    //     res.push(self.basename.clone());
+    //     for elm in &self.lines {
+    //         res.push(elm.clone());
+    //     }
+    //     return res;
+    // }
 
     fn get_color(&self) -> (u8, u8, u8) {
         self.color.clone()
     }
 
     fn make_line_info(&self, index: usize, now: SystemTime) -> String {
-        let mut acc = "".to_string();
         let bn = "err";
 
         let res_list_copy = self.result_list.clone();
 
         if index >= res_list_copy.len() {
-            acc = format!("{bn}: end reached update req!");
-            return acc;
+            return format!("{bn}: end reached update req!");
         }
 
         let current_rr_res = &res_list_copy.get(index);
         if current_rr_res.is_none() {
-            acc = format!("{bn}: out of bounds access!");
-            return acc;
+            return format!("{bn}: out of bounds access!");
         }
         let current_rr = current_rr_res.unwrap();
         let ts = current_rr.timestamp + current_rr.delay;
         let diff_dur_res = ts.duration_since(now);
         if diff_dur_res.is_err() {
-            acc = format!("{bn}: invalid time!");
-            return acc;
+            return format!("{bn}: invalid time!");
         }
         let diff_dur = diff_dur_res.unwrap();
         let mut minutes = diff_dur.as_secs() / 60;
         let seconds = diff_dur.as_secs() % 60;
         let name = &current_rr.transport_name;
+        let mut acc: String;
         if minutes < 60 {
             acc = format!("{name} {minutes}:{seconds:02}");
         } else {
@@ -330,12 +318,13 @@ impl DashBoardBusLine {
     }
 
     async fn update_text_field(&mut self) {
+        self.lines.clear();
         let copyyy = self.request_content.clone();
         let last_upp = self.last_update.clone();
         println!("update_text_field ");
         if self.future_answer.is_none() {
             if last_upp + REFRESH_INFERVAL > SystemTime::now() {} else {
-                let future = update_request_content(copyyy, last_upp);
+                let future = update_request_content(copyyy);
                 // *self.last_update = SystemTime::now();
                 self.future_answer = Some(tokio::spawn(future));
                 // self.future_answer.unwrap().into_future().await;
@@ -383,10 +372,10 @@ impl DashBoardBusLine {
             self.lines.push(format!("{bn}: len=0 update req!"));
             return;
         }
-        self.lines.clear();
-        for i in 0..2 {
+
+        for _i in 0..2 {
             let mut text_acc: String = "".to_string();
-            for j in 0..2 {
+            for _j in 0..2 {
                 while index < len_res_list {
                     if !res_list_copy[index].error {
                         break;
@@ -394,11 +383,11 @@ impl DashBoardBusLine {
                     index += 1;
                 }
 
-                let mut text1 = self.make_line_info(index, now);
+                let text1 = self.make_line_info(index, now);
 
-                let text = add_N_padding_or_cut(text1, TOTAL_CHAR_WIDTH / 2);
+                let text2 = add_N_padding_or_cut(text1, TOTAL_CHAR_WIDTH / 2);
 
-                text_acc += text.as_str();
+                text_acc += text2.as_str();
                 index += 1;
             }
             self.lines.push(text_acc);
@@ -407,7 +396,7 @@ impl DashBoardBusLine {
 }
 
 fn add_N_padding_or_cut(text1: String, max_car_num: usize) -> String {
-    let mut text_res;
+    let text_res;
     if text1.len() > max_car_num {
         let first_20 = &text1[0..max_car_num];
         text_res = first_20.to_string();
@@ -496,7 +485,7 @@ impl DashBoard {
     }
 
     async fn update_content(&mut self) {
-        let mut page = &mut self.pages[self.curr_page];
+        let page = &mut self.pages[self.curr_page];
         let lines = &mut page.sbb_entry;
         for elm in lines {
             elm.update_text_field().await;
@@ -507,8 +496,8 @@ impl DashBoard {
         let mut vec = Vec::new();
         if self.curr_page >= self.pages.len() {
             let cp = self.curr_page;
-            for i in 0..4 {
-                vec.push(DisplayLineData::new(format!("page {cp} missing"), (255, 255, 255)));
+            for i in 0..2 {
+                vec.push(DisplayLineData::new(format!("page {cp} {i} missing"), (255, 255, 255)));
             }
             return vec;
         }
@@ -555,7 +544,7 @@ impl DashBoard {
     }
 
     fn move_next_page_element(&mut self) {
-        let mut page = &mut self.pages[self.curr_page];
+        let  page = &mut self.pages[self.curr_page];
         return page.move_to_next_sbb_entry();
     }
 }
@@ -594,7 +583,6 @@ fn printooo(
     canvas.clear();
     let texture_creator = canvas.texture_creator();
 
-    let mut pixels = vec![0; (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize];
 
     for (i, line) in lines.iter().enumerate() {
         // render a surface, and convert it to a texture bound to the canvas
@@ -604,7 +592,7 @@ fn printooo(
             .render(line.text.as_str())
             .blended(Color::RGBA(r, g, b, 255))
             .map_err(|e| e.to_string()).unwrap();
-        let mut texture = texture_creator
+        let texture = texture_creator
             .create_texture_from_surface(&surface)
             .map_err(|e| e.to_string()).unwrap();
 
@@ -636,8 +624,7 @@ fn printooo(
         println!("cannot read pixels ");
         return;
     }
-
-    pixels = pixels_res.unwrap();
+    let pixels = pixels_res.unwrap();
 
     let image_res =
         RgbaImage::from_raw(
@@ -653,7 +640,7 @@ fn printooo(
 }
 
 
-fn update(mut sdl_context: &sdl2::Sdl,
+fn update(sdl_context: &sdl2::Sdl,
           indexx: &mut i32,
           alive: &mut bool) {
     let mut event_pump = sdl_context.event_pump().unwrap();
@@ -699,9 +686,6 @@ async fn run(font_path: &Path) -> Result<(), String> {
 
     // Load a font
     let font = ttf_context.load_font(font_path, 160).unwrap();
-
-    let event_subsystem = sdl_context.event()?;
-    let event_subsystem_arc = Arc::new(Mutex::new(event_subsystem));
 
     let mut indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
     let mut last_frame_time = SystemTime::now();
@@ -782,7 +766,10 @@ async fn run(font_path: &Path) -> Result<(), String> {
             print!("\rframe: {index_f} fps:{aa}");
         }
 
-        io::stdout().flush();
+        let res = io::stdout().flush();
+        if res.is_err(){
+            println!("Could not flush!!");
+        }
 
         index_f += 1;
 
