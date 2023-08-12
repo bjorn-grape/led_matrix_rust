@@ -18,6 +18,9 @@ use image::RgbaImage;
 use image::imageops::FilterType;
 use tokio::task::JoinHandle;
 use chrono::{Local, Datelike, Timelike};
+use sdl2::EventPump;
+use sdl2::surface::Surface;
+use sdl2::ttf::Font;
 
 const FPS: u32 = 30;
 const STEP: u32 = 32;
@@ -48,12 +51,12 @@ struct Departure {
 }
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Section {
     journey: Option<Journey>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Journey {
     category: String,
     number: String,
@@ -119,8 +122,6 @@ fn get_formatted_time() -> String {
 }
 
 async fn update_request_content(request_content: URLRequest) -> Option<Answer> {
-    // let last_update_val = *last_update.lock().unwrap();
-
     let b_sta = &request_content.begin_station;
     let e_sta = &request_content.end_station;
     let limit = request_content.limit;
@@ -129,26 +130,36 @@ async fn update_request_content(request_content: URLRequest) -> Option<Answer> {
         ss += &format!("&fields[]={elm}").as_str();
     }
     let resa = reqwest::get(&ss);
-    let res = resa.await;
     println!("{}", &ss);
-    if res.is_err() {
-        print!("Error sending GET request: {ss}");
-        return None;
-    }
-    let res_text = res.unwrap().text().await;
-    if res_text.is_err() {
-        print!("Error getting text from GET request: {ss}");
-        return None;
+
+    let future_text;
+    match resa.await {
+        Ok(e) => { future_text = e.text() }
+        Err(_) => {
+            print!("Error sending GET request: {ss}");
+            return None;
+        }
     }
 
-    let text_to_parse = res_text.unwrap();
-    println!("{}", text_to_parse);
-    let conn_res = serde_json::from_str(text_to_parse.as_str());
-    if conn_res.is_err() {
-        println!("eee is {}", conn_res.err().unwrap());
-        return None;
+    let text_to_parse;
+    match future_text.await {
+        Ok(e) => { text_to_parse = e; }
+        Err(_) => {
+            print!("Error getting text from GET request: {ss}");
+            return None;
+        }
     }
-    let conn: Connections = conn_res.unwrap();
+
+    println!("{}", text_to_parse);
+    let conn: Connections;
+    match serde_json::from_str(text_to_parse.as_str()) {
+        Ok(e) => { conn = e; }
+        Err(e) => {
+            println!("error is {e}");
+            return None;
+        }
+    };
+
 
     let url_results: Vec<URLResult> = conn.connections.iter()
         .map(|c| {
@@ -162,7 +173,11 @@ async fn update_request_content(request_content: URLRequest) -> Option<Answer> {
             }
             let mut name = "err".to_string();
             if curr_index < len {
-                let jn = ((c.sections[curr_index].journey).as_ref()).unwrap();
+                let jn = match c.sections[curr_index].journey.clone() {
+                    Some(journ) => { journ }
+                    None => {  Journey { category: "missing".to_string(), number: "missing".to_string() } }
+                };
+
                 name = format!("{}{}", jn.category, jn.number);
             }
 
@@ -196,26 +211,30 @@ struct URLResult {
 
 impl URLResult {
     fn new(opt_departure: Option<u64>, opt_delay: Option<u32>, transport_name: String) -> URLResult {
-        if opt_departure.is_none() {
-            return URLResult {
-                timestamp: SystemTime::now(),
-                delay: Duration::from_secs(0),
-                transport_name,
-                error: true,
-            };
-        }
+        let mut delay = match opt_delay {
+            None => { 0 }
+            Some(e) => { e }
+        };
 
-        let mut delay = 0;
-        if !opt_delay.is_none() {
-            delay = opt_delay.unwrap();
-        }
+        let duration_since_epoch;
 
-        let duration_since_epoch = Duration::from_secs(opt_departure.unwrap());
+        match opt_departure {
+            Some(d) => { duration_since_epoch = Duration::from_secs(d); }
+            None => {
+                return URLResult {
+                    timestamp: SystemTime::now(),
+                    delay: Duration::from_secs(0),
+                    transport_name,
+                    error: true,
+                };
+            }
+        };
+
         let instant = UNIX_EPOCH + duration_since_epoch;
         URLResult {
             timestamp: instant,
             delay: Duration::from_secs(delay as u64 * 60),
-            transport_name: transport_name,
+            transport_name,
             error: false,
         }
     }
@@ -367,9 +386,9 @@ impl DashBoardBusLine {
         let len_res_list = res_list_copy.len();
 
 
-        let bn = &self.basename;
         if len_res_list == 0 {
-            self.lines.push(format!("{bn}: len=0 update req!"));
+            self.lines.push(format!("No information available!"));
+            self.lines.push(format!("Check internet connection!"));
             return;
         }
 
@@ -544,7 +563,7 @@ impl DashBoard {
     }
 
     fn move_next_page_element(&mut self) {
-        let  page = &mut self.pages[self.curr_page];
+        let page = &mut self.pages[self.curr_page];
         return page.move_to_next_sbb_entry();
     }
 }
@@ -588,13 +607,23 @@ fn printooo(
         // render a surface, and convert it to a texture bound to the canvas
 
         let (r, g, b) = line.color;
-        let surface = font
+        let surface;
+        match font
             .render(line.text.as_str())
             .blended(Color::RGBA(r, g, b, 255))
-            .map_err(|e| e.to_string()).unwrap();
-        let texture = texture_creator
+            .map_err(|e| e.to_string())
+        {
+            Ok(e) => { surface = e; }
+            _ => { continue; }
+        }
+
+        let texture;
+        match texture_creator
             .create_texture_from_surface(&surface)
-            .map_err(|e| e.to_string()).unwrap();
+            .map_err(|e| e.to_string()) {
+            Ok(e) => { texture = e; }
+            Err(_) => { continue; }
+        }
 
         let TextureQuery { width, height, .. } = texture.query();
 
@@ -619,12 +648,15 @@ fn printooo(
         }
     }
 
-    let pixels_res = canvas.read_pixels(None, sdl2::pixels::PixelFormatEnum::RGBA8888);
-    if pixels_res.is_err() {
-        println!("cannot read pixels ");
-        return;
+    let pixels;
+    match canvas
+        .read_pixels(None, sdl2::pixels::PixelFormatEnum::RGBA8888) {
+        Ok(e) => { pixels = e; }
+        Err(_) => {
+            println!("cannot read pixels ");
+            return;
+        }
     }
-    let pixels = pixels_res.unwrap();
 
     let image_res =
         RgbaImage::from_raw(
@@ -643,7 +675,14 @@ fn printooo(
 fn update(sdl_context: &sdl2::Sdl,
           indexx: &mut i32,
           alive: &mut bool) {
-    let mut event_pump = sdl_context.event_pump().unwrap();
+    let mut event_pump;
+    match sdl_context.event_pump() {
+        Ok(e) => { event_pump = e; }
+        Err(_) => {
+            println!("Could not get event pump!");
+            return;
+        }
+    }
     while let Some(event) = event_pump.poll_event() {
         match event {
             Event::KeyDown {
@@ -685,7 +724,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
 
     // Load a font
-    let font = ttf_context.load_font(font_path, 160).unwrap();
+    let font = ttf_context.load_font(font_path, 160)?;
 
     let mut indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
     let mut last_frame_time = SystemTime::now();
@@ -767,7 +806,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
         }
 
         let res = io::stdout().flush();
-        if res.is_err(){
+        if res.is_err() {
             println!("Could not flush!!");
         }
 
