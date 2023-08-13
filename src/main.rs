@@ -1,5 +1,6 @@
 extern crate sdl2;
 
+use std::cell::RefCell;
 use std::env;
 use std::future::IntoFuture;
 use std::path::Path;
@@ -37,6 +38,37 @@ const TOTAL_CHAR_WIDTH: usize = 24;
 // You might want to adjust this value
 // 10 minutes
 const REFRESH_INFERVAL: Duration = Duration::from_secs(60 * 10);
+
+enum WebEvent {
+    BrightnessUp,
+    BrightnessDown,
+    NextDest,
+    PrevDest,
+    Reset,
+    TogglePlay,
+}
+
+struct DisplayStatus {
+    brightness_level: u8,
+    is_playing: bool,
+    dbl: Option<RefCell<DashBoardBusLine>>,
+}
+
+
+impl DisplayStatus {
+    // fn new() ->DisplayStatus{
+    //     DisplayStatus{
+    //         brightness_level:10,
+    //         is_playing:true
+    //     }
+    //
+    // }
+
+    fn increase_light(&mut self) {
+
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Connection {

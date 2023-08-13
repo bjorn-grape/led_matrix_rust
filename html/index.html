@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Remote</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+</head>
+<body>
+
+<h1>Screen Remote</h1>
+
+<div class="btn-container">
+    <button onclick="adjustLuminosity('up')">
+        <i class="fas fa-lightbulb"></i>
+        <i class="fas fa-arrow-up"></i>
+    </button>
+    <button onclick="adjustLuminosity('down')">
+        <i class="fas fa-lightbulb"></i>
+        <i class="fas fa-arrow-down"></i>
+    </button>
+    <button onclick="navigateContent('previous')">
+        <i class="fas fa-step-backward"></i>
+    </button>
+    <button onclick="navigateContent('next')">
+        <i class="fas fa-step-forward"></i>
+    </button>
+    <button onclick="resetContent()">
+        <i class="fas fa-redo"></i>
+    </button>
+    <button onclick="togglePlayPause()">
+        <i class="fas fa-play"></i>
+        <i class="fas fa-pause"></i>
+    </button>
+
+</div>
+
+<script src="ip.js"></script>
+<script src="script.js"></script>
+
+</body>
+</html>
+
