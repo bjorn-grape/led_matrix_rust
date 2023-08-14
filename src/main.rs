@@ -1,3 +1,5 @@
+mod build;
+
 extern crate sdl2;
 
 use std::cell::RefCell;
@@ -22,6 +24,11 @@ use chrono::{Local, Datelike, Timelike};
 use sdl2::EventPump;
 use sdl2::surface::Surface;
 use sdl2::ttf::Font;
+
+mod bindings {
+    // println!("OUT_DIR is: {}", env::var("OUT_DIR").unwrap());
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
 
 const FPS: u32 = 30;
 const STEP: u32 = 32;
