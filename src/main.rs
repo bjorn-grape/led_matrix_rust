@@ -27,6 +27,10 @@ use sdl2::ttf::Font;
 
 mod bindings {
     // println!("OUT_DIR is: {}", env::var("OUT_DIR").unwrap());
+
+    #![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
