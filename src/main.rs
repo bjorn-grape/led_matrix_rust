@@ -15,6 +15,7 @@ use std::thread;
 // use sdl2::sys::SDL_EventType;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
+use std::os::raw::c_void;
 use std::string::ToString;
 use serde::{Deserialize, Serialize};
 use image::RgbaImage;
@@ -29,8 +30,8 @@ mod bindings {
     // println!("OUT_DIR is: {}", env::var("OUT_DIR").unwrap());
 
     #![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+    #![allow(non_camel_case_types)]
+    #![allow(non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
@@ -809,6 +810,49 @@ async fn run(font_path: &Path) -> Result<(), String> {
     );
 
     dbl.add_page(page);
+    let hardware_mapping = std::ffi::CString::new("regular").unwrap();
+    let led_rgb_sequence = std::ffi::CString::new("RGB").unwrap();
+    let pixel_mapper_config = std::ffi::CString::new("").unwrap();
+    let panel_type = std::ffi::CString::new("").unwrap();
+    let rgb_option =  bindings::rgb_matrix_RGBMatrix_Options{
+        hardware_mapping: hardware_mapping.as_ptr(),
+        rows: 64,
+        cols: 64,
+        chain_length: 3,
+        parallel: 0,
+        pwm_bits: 0,
+        pwm_lsb_nanoseconds: 0,
+        pwm_dither_bits: 0,
+        brightness: 0,
+        scan_mode: 0,
+        row_address_type: 0,
+        multiplexing: 0,
+        disable_hardware_pulsing: false,
+        show_refresh_rate: false,
+        inverse_colors: false,
+        led_rgb_sequence: led_rgb_sequence.as_ptr(),
+        pixel_mapper_config: pixel_mapper_config.as_ptr(),
+        panel_type: panel_type.as_ptr(),
+        limit_refresh_rate_hz: 0,
+    };
+
+    let drop_priv_user = std::ffi::CString::new("").unwrap();
+    let drop_priv_group = std::ffi::CString::new("").unwrap();
+    let rgb_runtime_opt =  bindings::rgb_matrix_RuntimeOptions{
+        gpio_slowdown: 1,
+        daemon: 0,
+        drop_privileges: 0,
+        do_gpio_init: false,
+        drop_priv_user: drop_priv_user.as_ptr(),
+        drop_priv_group: drop_priv_group.as_ptr(),
+    };
+    let matrix;
+    unsafe {
+        matrix = bindings::rgb_matrix_RGBMatrix_CreateFromOptions(&rgb_option, &rgb_runtime_opt);
+        bindings::rgb_matrix_FrameCanvas_Fill(matrix as *mut c_void, 0, 255 ,0);
+    }
+
+    bindings::rgb_matrix_RGBMatrix();
     let mut index_f = 0;
     loop {
         if !alive {
