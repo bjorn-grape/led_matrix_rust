@@ -906,9 +906,9 @@ async fn run(font_path: &Path) -> Result<(), String> {
         if indexx < 0 {
             change_val = indexx;
         }
-        let upval: i32 = 16 * i as i32 + change_val as i32;
+        let upval: i32 = 10 + 16 * i as i32 + change_val as i32;
         unsafe {
-              bindings::draw_text(canvas, fonttt, 0,  upval, r, g, b, font_c_path.as_ptr(), 0 );
+              bindings::draw_text(canvas, fonttt, 0,  upval, r, g, b, line.text.as_str().as_ptr(), 0 );
         }
 
     }
