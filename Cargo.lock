@@ -828,6 +828,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "my_rust_led_display"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "chrono",
+ "image",
+ "reqwest",
+ "sdl2",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "nanorand"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1561,20 +1575,6 @@ name = "unicode-width"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0edd1e5b14653f783770bce4a4dabb4a5108a5370a5f5d8cfe8710c361f6c8b"
-
-[[package]]
-name = "untitled"
-version = "0.1.0"
-dependencies = [
- "bindgen",
- "chrono",
- "image",
- "reqwest",
- "sdl2",
- "serde",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "url"

@@ -37,7 +37,7 @@ use sdl2::ttf::Font;
 const FPS: u32 = 30;
 const STEP: u32 = 1;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
-const SECOND_NUM_WAIT: u32 = 2;
+const SECOND_NUM_WAIT: u32 = 5;
 
 const SCALE_FACTOR: u32 = 1;
 static SCREEN_WIDTH: u32 = 64 * 3 * SCALE_FACTOR;
@@ -45,7 +45,7 @@ static SCREEN_HEIGHT: u32 = 64 * SCALE_FACTOR;
 // const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
 const LINE_HEIGHT: i32 = 16 * SCALE_FACTOR as i32;
 
-const TOTAL_CHAR_WIDTH: usize = 24;
+const TOTAL_CHAR_WIDTH: usize = 32;
 // You might want to adjust this value
 // 10 minutes
 const REFRESH_INFERVAL: Duration = Duration::from_secs(60 * 10);
@@ -383,7 +383,6 @@ impl DashBoardBusLine {
         self.lines.clear();
         let copyyy = self.request_content.clone();
         let last_upp = self.last_update.clone();
-        println!("update_text_field ");
         if self.future_answer.is_none() {
             if last_upp + REFRESH_INFERVAL > SystemTime::now() {} else {
                 let future = update_request_content(copyyy);
@@ -564,7 +563,7 @@ impl DashBoard {
             return vec;
         }
         let page: &DashBoardPage = &self.pages[self.curr_page];
-        let ftime = add_N_padding_or_cut(format!("[{}]", get_formatted_time()), 24);
+        let ftime = add_N_padding_or_cut(format!("[{}]", get_formatted_time()), TOTAL_CHAR_WIDTH);
         vec.push(DisplayLineData::new(
             ftime.clone(),
             (255, 150, 255),
@@ -863,7 +862,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
     }
 
     // bindings::rgb_matrix_RGBMatrix();
-    let mut index_f = 0;
+    let mut index_f :u128 = 0;
     loop {
         if !alive {
             break;
