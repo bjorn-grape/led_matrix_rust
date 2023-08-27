@@ -24,12 +24,13 @@ use sdl2::EventPump;
 use sdl2::surface::Surface;
 use sdl2::ttf::Font;
 
-mod bindings {
+
+ mod bindings {
     // println!("OUT_DIR is: {}", env::var("OUT_DIR").unwrap());
 
-    #![allow(non_upper_case_globals)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
+    #[allow(non_upper_case_globals)]
+    #[allow(non_camel_case_types)]
+    #[allow(non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
@@ -752,21 +753,21 @@ fn update(sdl_context: &sdl2::Sdl,
 }
 
 async fn run(font_path: &Path) -> Result<(), String> {
-    let sdl_context = sdl2::init()?;
-    let video_subsys = sdl_context.video()?;
-    let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
+//  let sdl_context = sdl2::init()?;
+//  let video_subsys = sdl_context.video()?;
+//  let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
 
-    let window = video_subsys
-        .window("SDL2_TTF Example", SCREEN_WIDTH, SCREEN_HEIGHT)
-        .position_centered()
-        .opengl()
-        .build()
-        .map_err(|e| e.to_string())?;
+//  let window = video_subsys
+//      .window("SDL2_TTF Example", SCREEN_WIDTH, SCREEN_HEIGHT)
+//      .position_centered()
+//      .opengl()
+//      .build()
+//      .map_err(|e| e.to_string())?;
 
-    let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
+//  let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
 
-    // Load a font
-    let font = ttf_context.load_font(font_path, 160)?;
+//  // Load a font
+//  let font = ttf_context.load_font(font_path, 160)?;
 
     let mut indexx = (FPS * STEP * SECOND_NUM_WAIT) as i32;
     let mut last_frame_time = SystemTime::now();
@@ -808,47 +809,49 @@ async fn run(font_path: &Path) -> Result<(), String> {
     );
 
     dbl.add_page(page);
-//  let hardware_mapping = std::ffi::CString::new("regular").unwrap();
-//  let led_rgb_sequence = std::ffi::CString::new("RGB").unwrap();
-//  let pixel_mapper_config = std::ffi::CString::new("").unwrap();
-//  let panel_type = std::ffi::CString::new("").unwrap();
-//  let rgb_option =  bindings::rgb_matrix_RGBMatrix_Options{
-//      hardware_mapping: hardware_mapping.as_ptr(),
-//      rows: 64,
-//      cols: 64,
-//      chain_length: 3,
-//      parallel: 0,
-//      pwm_bits: 0,
-//      pwm_lsb_nanoseconds: 0,
-//      pwm_dither_bits: 0,
-//      brightness: 0,
-//      scan_mode: 0,
-//      row_address_type: 0,
-//      multiplexing: 0,
-//      disable_hardware_pulsing: false,
-//      show_refresh_rate: false,
-//      inverse_colors: false,
-//      led_rgb_sequence: led_rgb_sequence.as_ptr(),
-//      pixel_mapper_config: pixel_mapper_config.as_ptr(),
-//      panel_type: panel_type.as_ptr(),
-//      limit_refresh_rate_hz: 0,
-//  };
 
-//  let drop_priv_user = std::ffi::CString::new("").unwrap();
-//  let drop_priv_group = std::ffi::CString::new("").unwrap();
-//  let rgb_runtime_opt =  bindings::rgb_matrix_RuntimeOptions{
-//      gpio_slowdown: 1,
-//      daemon: 0,
-//      drop_privileges: 0,
-//      do_gpio_init: false,
-//      drop_priv_user: drop_priv_user.as_ptr(),
-//      drop_priv_group: drop_priv_group.as_ptr(),
-//  };
-//  let matrix;
-//  unsafe {
-//      matrix = bindings::rgb_matrix_RGBMatrix_CreateFromOptions(&rgb_option, &rgb_runtime_opt);
-//      bindings::rgb_matrix_FrameCanvas_Fill(matrix as *mut c_void, 0, 255 ,0);
-//  }
+    let hardware_mapping = std::ffi::CString::new("regular").unwrap();
+    let led_rgb_sequence = std::ffi::CString::new("RGB").unwrap();
+    let pixel_mapper_config = std::ffi::CString::new("").unwrap();
+    let panel_type = std::ffi::CString::new("").unwrap();
+    let mut rgb_option =  bindings::RGBLedMatrixOptions{
+        hardware_mapping: hardware_mapping.as_ptr(),
+        rows: 64,
+        cols: 64,
+        chain_length: 3,
+        parallel: 0,
+        pwm_bits: 0,
+        pwm_lsb_nanoseconds: 0,
+        pwm_dither_bits: 0,
+        brightness: 0,
+        scan_mode: 0,
+        row_address_type: 0,
+        multiplexing: 0,
+        disable_hardware_pulsing: false,
+        show_refresh_rate: false,
+        inverse_colors: false,
+        led_rgb_sequence: led_rgb_sequence.as_ptr(),
+        pixel_mapper_config: pixel_mapper_config.as_ptr(),
+        panel_type: panel_type.as_ptr(),
+        limit_refresh_rate_hz: 0,
+    };
+
+    let drop_priv_user = std::ffi::CString::new("").unwrap();
+    let drop_priv_group = std::ffi::CString::new("").unwrap();
+    let mut rgb_runtime_opt =  bindings::RGBLedRuntimeOptions {
+        gpio_slowdown: 1,
+        daemon: 0,
+        drop_privileges: 0,
+        do_gpio_init: false,
+        drop_priv_user: drop_priv_user.as_ptr(),
+        drop_priv_group: drop_priv_group.as_ptr(),
+    };
+    let matrix;
+    unsafe {
+        matrix = bindings::led_matrix_create_from_options_and_rt_options(&mut rgb_option, &mut rgb_runtime_opt);
+        let canvas = bindings::led_matrix_get_canvas(matrix);
+        bindings::led_canvas_fill(canvas, 0, 255 ,0);
+    }
 
     // bindings::rgb_matrix_RGBMatrix();
     let mut index_f = 0;
@@ -859,7 +862,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
         // Calculate the elapsed time since the last frame
         let elapsed = last_frame_time.elapsed();
 
-        update(&sdl_context, &mut indexx, &mut alive);
+ //       update(&sdl_context, &mut indexx, &mut alive);
 
         let mini = LINE_HEIGHT * (dbl.get_curr_page_size()) as i32 * -1;
         if indexx < mini + STEP as i32 {
@@ -872,7 +875,7 @@ async fn run(font_path: &Path) -> Result<(), String> {
         let lines = dbl.get_content();
 
         // Render your game here...
-        printooo(&mut canvas, &lines, &font, indexx);
+//        printooo(&mut canvas, &lines, &font, indexx);
         //canvas.present();
         if elapsed.is_err() {
             println!("Err with system time");
@@ -885,9 +888,9 @@ async fn run(font_path: &Path) -> Result<(), String> {
             if let Some(remaining) = remaining_time {
                 thread::sleep(remaining);
             }
-            let aa = 1000 / remaining_time.unwrap().as_millis();
+           // let aa = 1000 / remaining_time.unwrap().as_millis();
 
-            print!("\rframe: {index_f} fps:{aa}");
+            print!("\rframe: {index_f} ");
         }
 
         let res = io::stdout().flush();
