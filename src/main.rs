@@ -35,11 +35,11 @@ use sdl2::ttf::Font;
 }
 
 const FPS: u32 = 30;
-const STEP: u32 = 32;
+const STEP: u32 = 1;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000 / FPS) as u64);
 const SECOND_NUM_WAIT: u32 = 2;
 
-const SCALE_FACTOR: u32 = 8;
+const SCALE_FACTOR: u32 = 1;
 static SCREEN_WIDTH: u32 = 64 * 3 * SCALE_FACTOR;
 static SCREEN_HEIGHT: u32 = 64 * SCALE_FACTOR;
 // const CUSTOM_EVENT_TYPE: u32 = SDL_EventType::SDL_USEREVENT as u32 + 1;
@@ -671,7 +671,7 @@ fn printooo(
         let TextureQuery { width, height, .. } = texture.query();
 
         // If the example text is too big for the screen, downscale it (and center irregardless)
-        let padding = 128;
+        let padding = 16;
         let target = get_centered_rect(
             width,
             height,
@@ -847,10 +847,19 @@ async fn run(font_path: &Path) -> Result<(), String> {
         drop_priv_group: drop_priv_group.as_ptr(),
     };
     let matrix;
+    let fonttt;
+    let font_c_path; 
+    let canvas;
     unsafe {
-        matrix = bindings::led_matrix_create_from_options_and_rt_options(&mut rgb_option, &mut rgb_runtime_opt);
-        let canvas = bindings::led_matrix_get_canvas(matrix);
-        bindings::led_canvas_fill(canvas, 0, 255 ,0);
+      font_c_path = std::ffi::CString::new("myfont.bdf").unwrap();
+      matrix = bindings::led_matrix_create_from_options_and_rt_options(&mut rgb_option, &mut rgb_runtime_opt);
+     canvas = bindings::led_matrix_get_canvas(matrix);
+      fonttt = bindings::load_font(font_c_path.as_ptr());
+         
+      bindings::led_canvas_fill(canvas, 0, 0 ,0);
+      bindings::draw_text(canvas, fonttt, 0,  16,155,155,0, font_c_path.as_ptr(), 0 );
+
+
     }
 
     // bindings::rgb_matrix_RGBMatrix();
@@ -876,6 +885,36 @@ async fn run(font_path: &Path) -> Result<(), String> {
 
         // Render your game here...
 //        printooo(&mut canvas, &lines, &font, indexx);
+//
+//
+
+    unsafe {
+    
+              bindings::led_canvas_fill(canvas, 0, 0 ,0);
+    }
+
+
+    for (i, line) in lines.iter().enumerate() {
+        // render a surface, and convert it to a texture bound to the canvas
+
+        let (r, g, b) = line.color;
+
+        // If the example text is too big for the screen, downscale it (and center irregardless)
+        let padding = 16;
+        
+        let mut change_val = 0;
+        if indexx < 0 {
+            change_val = indexx;
+        }
+        let upval: i32 = 16 * i as i32 + change_val as i32;
+        unsafe {
+              bindings::draw_text(canvas, fonttt, 0,  upval, r, g, b, font_c_path.as_ptr(), 0 );
+        }
+
+    }
+
+
+
         //canvas.present();
         if elapsed.is_err() {
             println!("Err with system time");

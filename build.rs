@@ -46,6 +46,8 @@ fn main() {
     .allowlist_function("led_canvas_set_pixels")
     .allowlist_function("led_canvas_clear")
     .allowlist_function("led_canvas_fill")
+    .allowlist_function("draw_text")
+    .allowlist_function("load_font")
     .allowlist_function("led_matrix_create_offscreen_canvas")
     .allowlist_function("led_matrix_swap_on_vsync")
     .allowlist_function("led_matrix_get_brightness")
