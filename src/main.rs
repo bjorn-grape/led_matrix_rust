@@ -135,6 +135,23 @@ struct Answer {
     result_list: Vec<URLResult>,
 }
 
+fn get_brightness_from_time() -> f32 {
+
+    let now = Local::now();
+    let mut hour : u32 = now.hour();
+    let res :f32 = match hour {
+        7  => 0.3,
+        8 => 0.5,
+        9 => 0.8,
+        x if x >= 10 && x < 21 => 1.0,
+        21 => 0.7,
+        22 => 0.5,
+        23 => 0.3,
+        _ => 0.05,
+    };
+    return res;
+}
+
 fn get_formatted_time() -> String {
     let now = Local::now();
 
@@ -648,7 +665,22 @@ fn printooo(
     for (i, line) in lines.iter().enumerate() {
         // render a surface, and convert it to a texture bound to the canvas
 
-        let (r, g, b) = line.color;
+        let (r1, g1, b1) = line.color;
+ 
+        println!("R1={}" , r1);
+        println!("G1={}" , g1);
+        println!("B1={}" , b1);
+
+       let bri = get_brightness_from_time();
+        println!("BRI={}" , bri);
+        let r : u8 = (r1 as f32 * bri) as u8;
+        let g : u8 = (g1 as f32 * bri) as u8;
+        let b : u8 = (b1 as f32 * bri) as u8;
+
+        println!("R={}" , r);
+        println!("G={}" , g);
+        println!("B={}" , b);
+
         let surface;
         match font
             .render(line.text.as_str())
@@ -892,11 +924,26 @@ async fn run(font_path: &Path) -> Result<(), String> {
               bindings::led_canvas_fill(canvas, 0, 0 ,0);
     }
 
+ 
+
+       let bri = get_brightness_from_time();
+//        println!("BRI={}" , bri);
+    //      println!("R={}" , r);
+    //    println!("G={}" , g);
+     //   println!("B={}" , b);
+
+
+
+
 
     for (i, line) in lines.iter().enumerate() {
         // render a surface, and convert it to a texture bound to the canvas
 
-        let (r, g, b) = line.color;
+    let (r1, g1, b1) = line.color;
+      let r : u8 = (r1 as f32 * bri) as u8;
+        let g : u8 = (g1 as f32 * bri) as u8;
+        let b : u8 = (b1 as f32 * bri) as u8;
+
 
         // If the example text is too big for the screen, downscale it (and center irregardless)
         let padding = 16;
